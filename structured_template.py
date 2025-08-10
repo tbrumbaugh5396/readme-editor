@@ -37,11 +37,9 @@ class ReadmeSection:
         return self.name
 
     def get_markdown_header(self) -> str:
-        """Get the markdown header for this section with anchor"""
+        """Get the markdown header for this section"""
         header = "#" * self.level + " " + self.name
-        # Add HTML anchor for navigation
-        anchor_id = self.get_anchor_id()
-        return f'<a name="{anchor_id}"></a>\n{header}'
+        return header
 
     def get_anchor_id(self) -> str:
         """Get the anchor ID for linking (GitHub-style)"""
@@ -64,11 +62,6 @@ class ReadmeSection:
         if self.level > 0:
             result.append(self.get_markdown_header())
             result.append("")
-
-            # Add return link to table of contents (except for TOC itself and root level)
-            if self.level > 1 and self.name != "Table of contents":
-                result.append("[← Table of Contents](#table-of-contents)")
-                result.append("")
 
         # Add content
         if self.content.strip():
@@ -133,15 +126,11 @@ def create_readme_template() -> ReadmeSection:
     # Root section
     root = ReadmeSection("Project", level=0)
 
-    # Project Name
-    project_name = root.add_child(ReadmeSection("Project Name"))
-
-    # Overview
-    overview = root.add_child(ReadmeSection("Overview"))
-    overview.add_child(ReadmeSection("Audience", optional=True))
+    # Add sections that were previously under Overview as direct children
+    root.add_child(ReadmeSection("Audience", optional=True))
 
     # Philosophy of Development
-    philosophy = overview.add_child(
+    philosophy = root.add_child(
         ReadmeSection("Philosophy of Development", optional=True))
     philosophy.add_child(ReadmeSection("Readability", optional=True))
     philosophy.add_child(ReadmeSection("Types", optional=True))
@@ -153,7 +142,7 @@ def create_readme_template() -> ReadmeSection:
         ReadmeSection("Distribution and Packaging", optional=True))
 
     # Documentation Overview
-    doc_overview = overview.add_child(
+    doc_overview = root.add_child(
         ReadmeSection("Documentation Overview", optional=True))
     doc_overview.add_child(
         ReadmeSection("Documentation Principle", optional=True))
@@ -375,18 +364,18 @@ def populate_tree_ctrl(
 
         return item
 
-    # Add the root section's children as top-level items (H1 sections)
-    if root_section.children:
-        # Create a hidden root item
-        hidden_root = tree_ctrl.AddRoot("")
-
-        # Add each child as a direct child of the hidden root
-        for child in root_section.children:
-            add_section_to_tree(child, hidden_root)
-
-        # Expand all and hide the root to show H1 sections as top level
-        tree_ctrl.ExpandAll()
-        tree_ctrl.SetWindowStyleFlag(tree_ctrl.GetWindowStyleFlag()
-                                     | wx.TR_HIDE_ROOT)
+    # Add the root section as the visible root with project name
+    root_item = add_section_to_tree(root_section)
+    
+    # Add a special "Overview" item as the FIRST child that refers to root content
+    overview_item = tree_ctrl.PrependItem(root_item, "Overview")
+    item_to_section[overview_item] = root_section  # Maps to root for content editing
+    
+    # Expand the root and first level children
+    tree_ctrl.Expand(root_item)
+    child, cookie = tree_ctrl.GetFirstChild(root_item)
+    while child.IsOk():
+        tree_ctrl.Expand(child)
+        child, cookie = tree_ctrl.GetNextChild(root_item, cookie)
 
     return item_to_section

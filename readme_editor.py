@@ -543,6 +543,9 @@ class MainFrame(wx.Frame):
         # Update preview if visible
         if self.preview_visible:
             wx.CallAfter(self.update_preview)
+        
+        # Update the window title to reflect the current editor mode
+        self.update_title()
 
         event.Skip()
 
@@ -885,7 +888,9 @@ class MainFrame(wx.Frame):
     def on_new(self, event):
         """Create a new file"""
         if self.check_save_before_action():
-            self.get_current_editor().new_file()
+            # Reset both editors to ensure consistency
+            self.general_editor.new_file()
+            self.structured_editor.new_file()
             self.current_file = None
             self.is_modified = False
             self.update_title()
@@ -907,7 +912,11 @@ class MainFrame(wx.Frame):
                 try:
                     with open(pathname, 'r', encoding='utf-8') as file:
                         content = file.read()
-                    self.get_current_editor().load_content(content)
+                    
+                    # Load content into both editors to ensure consistency
+                    self.general_editor.load_content(content)
+                    self.structured_editor.load_content(content)
+                    
                     self.current_file = pathname
                     self.is_modified = False
                     self.update_title()
@@ -1189,8 +1198,22 @@ Your code here
     def update_title(self):
         """Update the window title"""
         title = "README Editor"
+        
+        # Check if we're in structured editing mode and have a project name
+        if hasattr(self, 'notebook') and hasattr(self, 'structured_editor'):
+            current_page = self.notebook.GetSelection()
+            if current_page == 1:  # Structured editor is page 1
+                project_name = self.structured_editor.project_name_ctrl.GetValue()
+                if project_name and project_name.strip() and project_name != "My Project":
+                    title += f" - {project_name.strip()}"
+        
         if self.current_file:
-            title += f" - {os.path.basename(self.current_file)}"
+            file_name = os.path.basename(self.current_file)
+            if " - " not in title:  # If no project name was added
+                title += f" - {file_name}"
+            else:  # Project name was added, append file name in parentheses
+                title += f" ({file_name})"
+        
         if self.is_modified:
             title += " *"
         self.SetTitle(title)
@@ -1286,6 +1309,29 @@ class StructuredEditor(wx.Panel):
         project_sizer.Add(self.project_name_ctrl, 1, wx.ALL | wx.EXPAND, 5)
         project_panel.SetSizer(project_sizer)
 
+        # Project description/overview section
+        overview_panel = wx.Panel(self)
+        overview_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        overview_label = wx.StaticText(overview_panel, label="Project Description (Overview):")
+        overview_label.SetFont(
+            wx.Font(10, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL,
+                    wx.FONTWEIGHT_BOLD))
+
+        self.overview_ctrl = wx.TextCtrl(overview_panel, 
+                                        style=wx.TE_MULTILINE | wx.TE_RICH2,
+                                        size=(-1, 80))
+        self.overview_ctrl.SetFont(
+            wx.Font(11, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL,
+                    wx.FONTWEIGHT_NORMAL))
+        self.overview_ctrl.SetToolTip(
+            "Enter a brief description of your project. This text will appear directly after the project name in the README."
+        )
+
+        overview_sizer.Add(overview_label, 0, wx.ALL, 5)
+        overview_sizer.Add(self.overview_ctrl, 1, wx.ALL | wx.EXPAND, 5)
+        overview_panel.SetSizer(overview_sizer)
+
         # Create splitter window for the rest
         splitter = wx.SplitterWindow(self, style=wx.SP_3D | wx.SP_LIVE_UPDATE)
 
@@ -1308,10 +1354,46 @@ class StructuredEditor(wx.Panel):
         self.disable_all_btn = wx.Button(controls_panel,
                                          label="Disable All",
                                          size=(80, -1))
+        self.toggle_optional_btn = wx.Button(controls_panel,
+                                            label="Toggle Optional",
+                                            size=(100, -1))
+
+        # Automation buttons
+        automation_label = wx.StaticText(controls_panel, label="Auto-generate:")
+        automation_label.SetFont(
+            wx.Font(9, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL,
+                    wx.FONTWEIGHT_BOLD))
+
+        self.auto_file_structure_btn = wx.Button(controls_panel,
+                                               label="File Structure",
+                                               size=(100, -1))
+        self.auto_file_structure_btn.SetToolTip(
+            "Automatically scan the project directory and generate file structure")
+
+        self.auto_dependencies_btn = wx.Button(controls_panel,
+                                             label="Dependencies",
+                                             size=(100, -1))
+        self.auto_dependencies_btn.SetToolTip(
+            "Automatically read requirements.txt and populate dependencies section")
+
+        self.auto_dev_deps_btn = wx.Button(controls_panel,
+                                         label="Dev Dependencies",
+                                         size=(100, -1))
+        self.auto_dev_deps_btn.SetToolTip(
+            "Automatically read requirements-dev.txt and populate developer dependencies section")
 
         controls_sizer.Add(self.toggle_btn, 0, wx.ALL, 2)
         controls_sizer.Add(self.enable_all_btn, 0, wx.ALL, 2)
         controls_sizer.Add(self.disable_all_btn, 0, wx.ALL, 2)
+        controls_sizer.Add(self.toggle_optional_btn, 0, wx.ALL, 2)
+        
+        # Add automation section
+        controls_sizer.Add(wx.StaticLine(controls_panel), 0, wx.EXPAND | wx.ALL, 2)
+        controls_sizer.Add(automation_label, 0, wx.ALL, 2)
+        controls_sizer.Add(self.auto_file_structure_btn, 0, wx.ALL, 2)
+        controls_sizer.Add(self.auto_dependencies_btn, 0, wx.ALL, 2)
+        controls_sizer.Add(self.auto_dev_deps_btn, 0, wx.ALL, 2)
+        
         controls_panel.SetSizer(controls_sizer)
 
         self.tree_ctrl = wx.TreeCtrl(self.tree_panel,
@@ -1349,6 +1431,7 @@ class StructuredEditor(wx.Panel):
 
         # Add everything to main sizer
         main_sizer.Add(project_panel, 0, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(overview_panel, 0, wx.EXPAND | wx.ALL, 5)
         main_sizer.Add(splitter, 1, wx.EXPAND)
         self.SetSizer(main_sizer)
 
@@ -1360,11 +1443,18 @@ class StructuredEditor(wx.Panel):
                                     self.on_project_name_focus)
         self.project_name_ctrl.Bind(wx.EVT_KILL_FOCUS,
                                     self.on_project_name_blur)
+        self.overview_ctrl.Bind(wx.EVT_TEXT, self.on_overview_changed)
 
         # Bind toggle control events
         self.toggle_btn.Bind(wx.EVT_BUTTON, self.on_toggle_section)
         self.enable_all_btn.Bind(wx.EVT_BUTTON, self.on_enable_all_sections)
         self.disable_all_btn.Bind(wx.EVT_BUTTON, self.on_disable_all_sections)
+        self.toggle_optional_btn.Bind(wx.EVT_BUTTON, self.on_toggle_optional_sections)
+        
+        # Bind automation button events
+        self.auto_file_structure_btn.Bind(wx.EVT_BUTTON, self.on_auto_generate_file_structure)
+        self.auto_dependencies_btn.Bind(wx.EVT_BUTTON, self.on_auto_generate_dependencies)
+        self.auto_dev_deps_btn.Bind(wx.EVT_BUTTON, self.on_auto_generate_dev_dependencies)
 
         # Add right-click context menu for tree
         self.tree_ctrl.Bind(wx.EVT_RIGHT_UP, self.on_tree_right_click)
@@ -1376,6 +1466,10 @@ class StructuredEditor(wx.Panel):
         # Initialize with current project name
         current_name = self.project_name_ctrl.GetValue() or "My Project"
         self.template_root.name = current_name
+        
+        # Load any existing overview content
+        if self.template_root.content:
+            self.overview_ctrl.SetValue(self.template_root.content)
 
         self.item_to_section = populate_tree_ctrl(self.tree_ctrl,
                                                   self.template_root)
@@ -1400,11 +1494,21 @@ class StructuredEditor(wx.Panel):
             # Save current section content before switching
             if self.current_section is not None:
                 self.current_section.content = self.section_editor.GetValue()
+                # If we were editing Overview (root content), sync to overview control
+                if self.current_section == self.template_root:
+                    self.overview_ctrl.SetValue(self.current_section.content)
 
             # Load new section
             self.current_section = self.item_to_section[item]
-            self.current_section_label.SetLabel(
-                f"Editing: {self.current_section.get_full_path()}")
+            
+            # Check if we're selecting the Overview (root content)
+            item_text = self.tree_ctrl.GetItemText(item)
+            if item_text == "Overview" and self.current_section == self.template_root:
+                self.current_section_label.SetLabel("Editing: Overview (Project Description)")
+            else:
+                self.current_section_label.SetLabel(
+                    f"Editing: {self.current_section.get_full_path()}")
+            
             self.section_editor.SetValue(self.current_section.content)
 
             # Update editor state
@@ -1416,6 +1520,13 @@ class StructuredEditor(wx.Panel):
         """Handle section text change"""
         if self.current_section is not None:
             self.current_section.content = self.section_editor.GetValue()
+            
+            # If we're editing Overview (root content), sync to overview control
+            if self.current_section == self.template_root:
+                # Temporarily unbind to avoid recursion
+                self.overview_ctrl.Unbind(wx.EVT_TEXT)
+                self.overview_ctrl.SetValue(self.current_section.content)
+                self.overview_ctrl.Bind(wx.EVT_TEXT, self.on_overview_changed)
 
         if self.main_frame:
             self.main_frame.set_modified()
@@ -1441,16 +1552,56 @@ class StructuredEditor(wx.Panel):
 
         if self.main_frame:
             self.main_frame.set_modified()
+            # Update the window title to reflect the new project name
+            self.main_frame.update_title()
+            # Update preview if visible
+            if self.main_frame.preview_visible:
+                wx.CallAfter(self.main_frame.update_preview)
+        event.Skip()
+
+    def on_overview_changed(self, event):
+        """Handle overview/description text change"""
+        if self.template_root:
+            # Store the overview content in the root section
+            self.template_root.content = self.overview_ctrl.GetValue()
+            
+            # If we're currently editing the Overview in the section editor, sync it
+            if self.current_section == self.template_root:
+                # Temporarily unbind to avoid recursion
+                self.section_editor.Unbind(wx.EVT_TEXT)
+                self.section_editor.SetValue(self.template_root.content)
+                self.section_editor.Bind(wx.EVT_TEXT, self.on_section_text_changed)
+
+        if self.main_frame:
+            self.main_frame.set_modified()
             # Update preview if visible
             if self.main_frame.preview_visible:
                 wx.CallAfter(self.main_frame.update_preview)
         event.Skip()
 
     def refresh_tree_root(self):
-        """Refresh the tree display (project name no longer shows in tree)"""
-        # Project name is now handled by the dedicated field only
-        # Tree starts with content sections directly
-        pass
+        """Refresh the tree display to show updated project name"""
+        if self.template_root:
+            # Store the currently selected section to restore it
+            current_selection = None
+            current_item = self.tree_ctrl.GetSelection()
+            if current_item.IsOk() and current_item in self.item_to_section:
+                current_selection = self.item_to_section[current_item]
+            
+            # Save current section content before refreshing
+            if self.current_section is not None:
+                self.current_section.content = self.section_editor.GetValue()
+            
+            # Repopulate the tree with updated project name
+            from structured_template import populate_tree_ctrl
+            self.item_to_section = populate_tree_ctrl(self.tree_ctrl, self.template_root)
+            
+            # Try to restore the selection
+            if current_selection:
+                for item, section in self.item_to_section.items():
+                    if section == current_selection:
+                        self.tree_ctrl.SelectItem(item)
+                        break
 
     def on_project_name_focus(self, event):
         """Handle project name field gaining focus"""
@@ -1534,6 +1685,26 @@ class StructuredEditor(wx.Panel):
                 if self.main_frame.preview_visible:
                     wx.CallAfter(self.main_frame.update_preview)
 
+    def on_toggle_optional_sections(self, event):
+        """Toggle all optional sections in the template"""
+        if self.template_root:
+            # Check if any optional sections are currently enabled
+            any_optional_enabled = self._any_optional_sections_enabled(self.template_root)
+            
+            # If any are enabled, disable all optional; if none are enabled, enable all optional
+            new_state = not any_optional_enabled
+            self._set_optional_sections_enabled(self.template_root, new_state)
+            self.refresh_tree_display()
+
+            if self.main_frame and hasattr(self.main_frame, 'status_bar'):
+                status_text = "All optional sections enabled" if new_state else "All optional sections disabled"
+                self.main_frame.status_bar.SetStatusText(status_text)
+
+            if self.main_frame:
+                self.main_frame.set_modified()
+                if self.main_frame.preview_visible:
+                    wx.CallAfter(self.main_frame.update_preview)
+
     def on_tree_right_click(self, event):
         """Handle right-click on tree for context menu"""
         pt = event.GetPosition()
@@ -1597,6 +1768,22 @@ class StructuredEditor(wx.Panel):
             section.enabled = True
         for child in section.children:
             self._enable_essential_sections(child, essential_names)
+
+    def _set_optional_sections_enabled(self, section, enabled):
+        """Recursively set enabled state for optional sections only"""
+        if section.optional:
+            section.enabled = enabled
+        for child in section.children:
+            self._set_optional_sections_enabled(child, enabled)
+
+    def _any_optional_sections_enabled(self, section):
+        """Check if any optional sections are currently enabled"""
+        if section.optional and section.enabled:
+            return True
+        for child in section.children:
+            if self._any_optional_sections_enabled(child):
+                return True
+        return False
 
     def refresh_tree_display(self):
         """Refresh the tree display to show updated enabled/disabled states"""
@@ -1729,12 +1916,11 @@ class StructuredEditor(wx.Panel):
                     continue
 
                 if child.name == "Table of contents":
-                    # Auto-generate table of contents with proper anchor
-                    anchor_id = child.get_anchor_id()
+                    # Auto-generate table of contents
                     auto_toc = self.template_root.generate_table_of_contents()
 
-                    # Create TOC section with anchor for navigation
-                    toc_header = f'<a name="{anchor_id}"></a>\n## Table of contents\n\n'
+                    # Create TOC section
+                    toc_header = "## Table of contents\n\n"
 
                     if child.content.strip():
                         # Use custom content and add auto-generated TOC
@@ -1754,6 +1940,266 @@ class StructuredEditor(wx.Panel):
         else:
             project_name = self.project_name_ctrl.GetValue() or "My Project"
             return f"# {project_name}\n\nNo content available."
+
+    # Automation methods
+    def on_auto_generate_file_structure(self, event):
+        """Auto-generate project file structure"""
+        try:
+            # Get the project directory (where the app is running from or where file is saved)
+            if self.main_frame and self.main_frame.current_file:
+                project_dir = os.path.dirname(self.main_frame.current_file)
+            else:
+                project_dir = os.getcwd()
+            
+            # Generate file structure
+            file_structure = self._scan_directory_structure(project_dir)
+            
+            # Find the "Project Structure" section and populate it
+            section = self._find_section_by_name(self.template_root, "Project Structure")
+            if section:
+                section.content = file_structure
+                section.enabled = True
+                
+                # If this section is currently selected, update the editor
+                if self.current_section == section:
+                    self.section_editor.SetValue(section.content)
+                
+                # Refresh tree to show enabled section
+                self.refresh_tree_display()
+                
+                if self.main_frame:
+                    self.main_frame.set_modified()
+                    if hasattr(self.main_frame, 'status_bar'):
+                        self.main_frame.status_bar.SetStatusText(
+                            f"Generated file structure for {project_dir}")
+                    if self.main_frame.preview_visible:
+                        wx.CallAfter(self.main_frame.update_preview)
+            else:
+                wx.MessageBox("Could not find 'Project Structure' section in template.",
+                            "Section Not Found", wx.OK | wx.ICON_WARNING)
+                
+        except Exception as e:
+            wx.MessageBox(f"Error generating file structure: {str(e)}",
+                        "Error", wx.OK | wx.ICON_ERROR)
+
+    def on_auto_generate_dependencies(self, event):
+        """Auto-generate project dependencies from requirements.txt"""
+        try:
+            # Get the project directory
+            if self.main_frame and self.main_frame.current_file:
+                project_dir = os.path.dirname(self.main_frame.current_file)
+            else:
+                project_dir = os.getcwd()
+            
+            requirements_file = os.path.join(project_dir, "requirements.txt")
+            
+            if not os.path.exists(requirements_file):
+                wx.MessageBox(f"requirements.txt not found in {project_dir}",
+                            "File Not Found", wx.OK | wx.ICON_WARNING)
+                return
+            
+            # Read and parse requirements.txt
+            dependencies_content = self._parse_requirements_file(requirements_file)
+            
+            # Find appropriate section(s) for dependencies
+            # Prioritize "Dependency" under Project Architecture first
+            target_sections = ["Dependency", "Dependencies", "Software Dependencies", "Python Libraries", "Install Dependencies"]
+            section = None
+            for section_name in target_sections:
+                section = self._find_section_by_name(self.template_root, section_name)
+                if section:
+                    break
+            
+            if section:
+                section.content = dependencies_content
+                section.enabled = True
+                
+                # If this section is currently selected, update the editor
+                if self.current_section == section:
+                    self.section_editor.SetValue(section.content)
+                
+                # Refresh tree to show enabled section
+                self.refresh_tree_display()
+                
+                if self.main_frame:
+                    self.main_frame.set_modified()
+                    if hasattr(self.main_frame, 'status_bar'):
+                        self.main_frame.status_bar.SetStatusText(
+                            "Generated dependencies from requirements.txt")
+                    if self.main_frame.preview_visible:
+                        wx.CallAfter(self.main_frame.update_preview)
+            else:
+                wx.MessageBox("Could not find a suitable dependencies section in template.",
+                            "Section Not Found", wx.OK | wx.ICON_WARNING)
+                
+        except Exception as e:
+            wx.MessageBox(f"Error generating dependencies: {str(e)}",
+                        "Error", wx.OK | wx.ICON_ERROR)
+
+    def on_auto_generate_dev_dependencies(self, event):
+        """Auto-generate developer dependencies from requirements-dev.txt"""
+        try:
+            # Get the project directory
+            if self.main_frame and self.main_frame.current_file:
+                project_dir = os.path.dirname(self.main_frame.current_file)
+            else:
+                project_dir = os.getcwd()
+            
+            dev_requirements_file = os.path.join(project_dir, "requirements-dev.txt")
+            
+            if not os.path.exists(dev_requirements_file):
+                wx.MessageBox(f"requirements-dev.txt not found in {project_dir}",
+                            "File Not Found", wx.OK | wx.ICON_WARNING)
+                return
+            
+            # Read and parse requirements-dev.txt
+            dev_dependencies_content = self._parse_requirements_file(dev_requirements_file, is_dev=True)
+            
+            # Find appropriate section(s) for developer dependencies
+            target_sections = ["Install Developer Tools", "Developer Dependencies", "Development Setup", "Dev Dependencies"]
+            section = None
+            for section_name in target_sections:
+                section = self._find_section_by_name(self.template_root, section_name)
+                if section:
+                    break
+            
+            if section:
+                section.content = dev_dependencies_content
+                section.enabled = True
+                
+                # If this section is currently selected, update the editor
+                if self.current_section == section:
+                    self.section_editor.SetValue(section.content)
+                
+                # Refresh tree to show enabled section
+                self.refresh_tree_display()
+                
+                if self.main_frame:
+                    self.main_frame.set_modified()
+                    if hasattr(self.main_frame, 'status_bar'):
+                        self.main_frame.status_bar.SetStatusText(
+                            "Generated developer dependencies from requirements-dev.txt")
+                    if self.main_frame.preview_visible:
+                        wx.CallAfter(self.main_frame.update_preview)
+            else:
+                wx.MessageBox("Could not find a suitable developer dependencies section in template.",
+                            "Section Not Found", wx.OK | wx.ICON_WARNING)
+                
+        except Exception as e:
+            wx.MessageBox(f"Error generating developer dependencies: {str(e)}",
+                        "Error", wx.OK | wx.ICON_ERROR)
+
+    # Helper methods for automation
+    def _find_section_by_name(self, section, name):
+        """Recursively find a section by name"""
+        if section.name == name:
+            return section
+        for child in section.children:
+            result = self._find_section_by_name(child, name)
+            if result:
+                return result
+        return None
+
+    def _scan_directory_structure(self, directory):
+        """Scan directory and generate markdown file structure"""
+        try:
+            def generate_tree(path, prefix="", is_last=True, max_depth=3, current_depth=0):
+                if current_depth > max_depth:
+                    return ""
+                
+                items = []
+                try:
+                    for item in sorted(os.listdir(path)):
+                        # Skip hidden files and common unwanted directories
+                        if item.startswith('.') or item in ['__pycache__', 'node_modules', '.git', '.venv', 'venv', 'env', '.pytest_cache']:
+                            continue
+                        items.append(item)
+                except PermissionError:
+                    return f"{prefix}├── [Permission Denied]\n"
+                
+                result = ""
+                for i, item in enumerate(items):
+                    is_last_item = i == len(items) - 1
+                    item_path = os.path.join(path, item)
+                    
+                    if is_last_item:
+                        result += f"{prefix}└── {item}\n"
+                        new_prefix = prefix + "    "
+                    else:
+                        result += f"{prefix}├── {item}\n"
+                        new_prefix = prefix + "│   "
+                    
+                    if os.path.isdir(item_path) and current_depth < max_depth:
+                        result += generate_tree(item_path, new_prefix, is_last_item, max_depth, current_depth + 1)
+                
+                return result
+            
+            project_name = os.path.basename(directory)
+            tree_content = f"```\n{project_name}/\n"
+            tree_content += generate_tree(directory, "", True)
+            tree_content += "```\n\n"
+            tree_content += f"Generated from: `{directory}`"
+            
+            return tree_content
+            
+        except Exception as e:
+            return f"Error generating file structure: {str(e)}"
+
+    def _parse_requirements_file(self, requirements_file, is_dev=False):
+        """Parse requirements.txt file and generate markdown content"""
+        try:
+            with open(requirements_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            content = ""
+            if is_dev:
+                content += "### Development Dependencies\n\n"
+                content += "These packages are required for development and testing:\n\n"
+            else:
+                content += "### Required Dependencies\n\n"
+                content += "This project requires the following Python packages:\n\n"
+            
+            # Parse requirements
+            packages = []
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith('#') and not line.startswith('-'):
+                    # Handle different requirement formats
+                    if '>=' in line:
+                        package, version = line.split('>=', 1)
+                        packages.append(f"- **{package.strip()}** >= {version.strip()}")
+                    elif '==' in line:
+                        package, version = line.split('==', 1)
+                        packages.append(f"- **{package.strip()}** (version {version.strip()})")
+                    elif '>' in line:
+                        package, version = line.split('>', 1)
+                        packages.append(f"- **{package.strip()}** > {version.strip()}")
+                    elif '<' in line:
+                        package, version = line.split('<', 1)
+                        packages.append(f"- **{package.strip()}** < {version.strip()}")
+                    else:
+                        packages.append(f"- **{line.strip()}**")
+            
+            if packages:
+                content += "\n".join(packages)
+                content += "\n\n"
+                if is_dev:
+                    content += "#### Install Development Dependencies\n\n"
+                    content += "```bash\n"
+                    content += "pip install -r requirements-dev.txt\n"
+                    content += "```"
+                else:
+                    content += "#### Install Dependencies\n\n"
+                    content += "```bash\n"
+                    content += "pip install -r requirements.txt\n"
+                    content += "```"
+            else:
+                content += "No dependencies found in requirements file."
+            
+            return content
+            
+        except Exception as e:
+            return f"Error reading requirements file: {str(e)}"
 
 
 if __name__ == "__main__":
