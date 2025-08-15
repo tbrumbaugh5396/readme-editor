@@ -27,7 +27,12 @@ try:
 except ImportError:
     MARKDOWN_AVAILABLE = False
     PYMDOWN_AVAILABLE = False
-from structured_template import create_readme_template, populate_tree_ctrl, ReadmeSection
+try:
+    # Running package-import style
+    from .structured_template import create_readme_template, populate_tree_ctrl, ReadmeSection  # type: ignore
+except Exception:
+    # Fallback when running this file directly
+    from structured_template import create_readme_template, populate_tree_ctrl, ReadmeSection  # type: ignore
 
 
 class ReadmeEditorApp(wx.App):
@@ -1593,7 +1598,10 @@ class StructuredEditor(wx.Panel):
                 self.current_section.content = self.section_editor.GetValue()
             
             # Repopulate the tree with updated project name
-            from structured_template import populate_tree_ctrl
+            try:
+                from .structured_template import populate_tree_ctrl  # type: ignore
+            except Exception:
+                from structured_template import populate_tree_ctrl  # type: ignore
             self.item_to_section = populate_tree_ctrl(self.tree_ctrl, self.template_root)
             
             # Try to restore the selection
@@ -1796,7 +1804,10 @@ class StructuredEditor(wx.Panel):
                 current_section = self.item_to_section[current_selection]
 
             # Rebuild tree
-            from structured_template import populate_tree_ctrl
+            try:
+                from .structured_template import populate_tree_ctrl  # type: ignore
+            except Exception:
+                from structured_template import populate_tree_ctrl  # type: ignore
             self.item_to_section = populate_tree_ctrl(self.tree_ctrl,
                                                       self.template_root)
 
