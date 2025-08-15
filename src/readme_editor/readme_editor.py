@@ -8,6 +8,7 @@ import wx
 import wx.html
 import os
 import re
+import sys
 import webbrowser
 from typing import Optional
 try:
@@ -33,6 +34,126 @@ try:
 except Exception:
     # Fallback when running this file directly
     from structured_template import create_readme_template, populate_tree_ctrl, ReadmeSection  # type: ignore
+
+
+class CustomColorDialog(wx.Dialog):
+    """Custom color picker dialog with RGB sliders since wx.ColourDialog is broken on macOS"""
+    
+    def __init__(self, parent, title):
+        super().__init__(parent, title=title, size=(400, 300))
+        
+        self.color = wx.Colour(0, 0, 0)  # Default black
+        
+        # Create main panel
+        panel = wx.Panel(self)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        
+        # Color preview
+        self.color_preview = wx.Panel(panel, size=(100, 50))
+        self.color_preview.SetBackgroundColour(self.color)
+        
+        # RGB sliders
+        slider_sizer = wx.FlexGridSizer(3, 3, 5, 5)
+        
+        # Red slider
+        slider_sizer.Add(wx.StaticText(panel, label="Red:"), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.red_slider = wx.Slider(panel, value=0, minValue=0, maxValue=255, style=wx.SL_HORIZONTAL)
+        self.red_text = wx.StaticText(panel, label="0")
+        slider_sizer.Add(self.red_slider, 1, wx.EXPAND)
+        slider_sizer.Add(self.red_text, 0, wx.ALIGN_CENTER_VERTICAL)
+        
+        # Green slider
+        slider_sizer.Add(wx.StaticText(panel, label="Green:"), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.green_slider = wx.Slider(panel, value=0, minValue=0, maxValue=255, style=wx.SL_HORIZONTAL)
+        self.green_text = wx.StaticText(panel, label="0")
+        slider_sizer.Add(self.green_slider, 1, wx.EXPAND)
+        slider_sizer.Add(self.green_text, 0, wx.ALIGN_CENTER_VERTICAL)
+        
+        # Blue slider
+        slider_sizer.Add(wx.StaticText(panel, label="Blue:"), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.blue_slider = wx.Slider(panel, value=0, minValue=0, maxValue=255, style=wx.SL_HORIZONTAL)
+        self.blue_text = wx.StaticText(panel, label="0")
+        slider_sizer.Add(self.blue_slider, 1, wx.EXPAND)
+        slider_sizer.Add(self.blue_text, 0, wx.ALIGN_CENTER_VERTICAL)
+        
+        slider_sizer.AddGrowableCol(1)
+        
+        # Preset colors
+        preset_sizer = wx.WrapSizer()
+        presets = [
+            (255, 0, 0),    # Red
+            (0, 255, 0),    # Green
+            (0, 0, 255),    # Blue
+            (255, 255, 0),  # Yellow
+            (255, 0, 255),  # Magenta
+            (0, 255, 255),  # Cyan
+            (0, 0, 0),      # Black
+            (128, 128, 128), # Gray
+            (255, 255, 255), # White
+        ]
+        
+        for r, g, b in presets:
+            btn = wx.Button(panel, size=(30, 30))
+            btn.SetBackgroundColour(wx.Colour(r, g, b))
+            btn.Bind(wx.EVT_BUTTON, lambda evt, color=(r, g, b): self.on_preset_color(color))
+            preset_sizer.Add(btn, 0, wx.ALL, 2)
+        
+        # Buttons
+        btn_sizer = wx.StdDialogButtonSizer()
+        ok_btn = wx.Button(panel, wx.ID_OK)
+        cancel_btn = wx.Button(panel, wx.ID_CANCEL)
+        btn_sizer.AddButton(ok_btn)
+        btn_sizer.AddButton(cancel_btn)
+        btn_sizer.Realize()
+        
+        # Layout
+        sizer.Add(wx.StaticText(panel, label="Color Preview:"), 0, wx.ALL, 5)
+        sizer.Add(self.color_preview, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(slider_sizer, 0, wx.ALL | wx.EXPAND, 10)
+        sizer.Add(wx.StaticText(panel, label="Presets:"), 0, wx.ALL, 5)
+        sizer.Add(preset_sizer, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(btn_sizer, 0, wx.ALL | wx.CENTER, 10)
+        
+        panel.SetSizer(sizer)
+        
+        # Bind events
+        self.red_slider.Bind(wx.EVT_SLIDER, self.on_slider_change)
+        self.green_slider.Bind(wx.EVT_SLIDER, self.on_slider_change)
+        self.blue_slider.Bind(wx.EVT_SLIDER, self.on_slider_change)
+        
+    def on_slider_change(self, event):
+        """Update color when sliders change"""
+        r = self.red_slider.GetValue()
+        g = self.green_slider.GetValue()
+        b = self.blue_slider.GetValue()
+        
+        self.color = wx.Colour(r, g, b)
+        self.color_preview.SetBackgroundColour(self.color)
+        self.color_preview.Refresh()
+        
+        self.red_text.SetLabel(str(r))
+        self.green_text.SetLabel(str(g))
+        self.blue_text.SetLabel(str(b))
+        
+    def on_preset_color(self, rgb):
+        """Set color from preset button"""
+        r, g, b = rgb
+        self.red_slider.SetValue(r)
+        self.green_slider.SetValue(g)
+        self.blue_slider.SetValue(b)
+        self.on_slider_change(None)
+        
+    def set_color(self, color):
+        """Set the initial color"""
+        self.color = color
+        self.red_slider.SetValue(color.Red())
+        self.green_slider.SetValue(color.Green())
+        self.blue_slider.SetValue(color.Blue())
+        self.on_slider_change(None)
+        
+    def get_color(self):
+        """Get the selected color"""
+        return self.color
 
 
 class ReadmeEditorApp(wx.App):
@@ -111,6 +232,8 @@ class MainFrame(wx.Frame):
         view_menu.AppendSeparator()
         self.preview_toggle_item = view_menu.AppendCheckItem(
             wx.ID_ANY, "&Preview Panel\tF12", "Toggle markdown preview panel")
+        self.toc_link_toggle_item = view_menu.AppendCheckItem(
+            wx.ID_ANY, "&Link headers to TOC", "Append [Table of Contents] link to each header")
         menubar.Append(view_menu, "&View")
 
         # Format menu
@@ -217,6 +340,7 @@ class MainFrame(wx.Frame):
                   self.structured_view_item)
         self.Bind(wx.EVT_MENU, self.on_toggle_preview,
                   self.preview_toggle_item)
+        self.Bind(wx.EVT_MENU, self.on_toggle_toc_links, self.toc_link_toggle_item)
 
         # Format menu bindings
         self.Bind(wx.EVT_MENU, lambda evt: self.insert_header(1), self.h1_item)
@@ -238,6 +362,20 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_link, self.link_item)
         self.Bind(wx.EVT_MENU, self.on_image, self.image_item)
         self.Bind(wx.EVT_MENU, self.on_table, self.table_item)
+        # Appearance actions
+        self.set_font_item = wx.MenuItem(format_menu, wx.ID_ANY, "Set &Font...\tCtrl+Shift+F")
+        self.set_text_color_item = wx.MenuItem(format_menu, wx.ID_ANY, "Set &Text Color...\tCtrl+Shift+T")
+        self.set_bg_color_item = wx.MenuItem(format_menu, wx.ID_ANY, "Set &Background Color...\tCtrl+Shift+B")
+        self.clear_formatting_item = wx.MenuItem(format_menu, wx.ID_ANY, "&Clear Formatting\tCtrl+Shift+R")
+        format_menu.AppendSeparator()
+        format_menu.Append(self.set_font_item)
+        format_menu.Append(self.set_text_color_item)
+        format_menu.Append(self.set_bg_color_item)
+        format_menu.Append(self.clear_formatting_item)
+        self.Bind(wx.EVT_MENU, self.on_set_editor_font, self.set_font_item)
+        self.Bind(wx.EVT_MENU, self.on_set_text_color, self.set_text_color_item)
+        self.Bind(wx.EVT_MENU, self.on_set_background_color, self.set_bg_color_item)
+        self.Bind(wx.EVT_MENU, self.on_clear_formatting, self.clear_formatting_item)
 
     def create_toolbar(self):
         """Create the toolbar"""
@@ -578,6 +716,114 @@ class MainFrame(wx.Frame):
             toolbar = self.GetToolBar()
             toolbar.ToggleTool(self.preview_toggle_tool.GetId(),
                                self.preview_visible)
+
+    def apply_editor_appearance(self):
+        """Apply stored appearance to editors"""
+        font = getattr(self, 'editor_font', None)
+        text_colour = getattr(self, 'editor_text_colour', None)
+        bg_colour = getattr(self, 'editor_background_colour', None)
+        
+        if hasattr(self, 'general_editor') and self.general_editor:
+            self.general_editor.apply_appearance(font, text_colour, bg_colour)
+        if hasattr(self, 'structured_editor') and self.structured_editor:
+            self.structured_editor.apply_appearance(font, text_colour, bg_colour)
+
+    def on_set_editor_font(self, event):
+        """Open font dialog to set editor font"""
+        dlg = wx.FontDialog(self)
+        if dlg.ShowModal() == wx.ID_OK:
+            data = dlg.GetFontData()
+            chosen = data.GetChosenFont()
+            self.editor_font = self._normalize_font_for_macos(chosen)
+            self.apply_editor_appearance()
+            self.set_modified()
+        dlg.Destroy()
+
+    def on_set_text_color(self, event):
+        """Open custom color picker for text color"""
+        dlg = CustomColorDialog(self, "Choose Text Color")
+        if hasattr(self, 'editor_text_colour') and self.editor_text_colour:
+            dlg.set_color(self.editor_text_colour)
+        
+        if dlg.ShowModal() == wx.ID_OK:
+            color = dlg.get_color()
+            self.editor_text_colour = color
+            self.apply_editor_appearance()
+            self.set_modified()
+        dlg.Destroy()
+
+    def _normalize_font_for_macos(self, font: wx.Font) -> wx.Font:
+        """Avoid CoreText warnings by remapping hidden macOS UI font names.
+
+        Some system fonts (e.g. '.SFNS-Regular') are private CoreText names.
+        If selected, rebuild a similar wx.Font using system GUI family
+        without a private face name.
+        """
+        try:
+            if sys.platform == 'darwin':
+                face = font.GetFaceName() or ""
+                if face.startswith('.') or 'SFNS' in face:
+                    # Build a new font with same metrics but generic family
+                    size = font.GetPointSize()
+                    style = font.GetStyle()
+                    weight = font.GetWeight()
+                    underline = font.GetUnderlined()
+                    # Prefer the default GUI font family
+                    sys_font = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
+                    family = sys_font.GetFamily() if sys_font.IsOk() else wx.FONTFAMILY_DEFAULT
+                    safe = wx.Font(size, family, style, weight, underline)
+                    return safe
+        except Exception:
+            pass
+        return font
+
+    def on_set_background_color(self, event):
+        """Open custom color picker for background color"""
+        dlg = CustomColorDialog(self, "Choose Background Color")
+        if hasattr(self, 'editor_background_colour') and self.editor_background_colour:
+            dlg.set_color(self.editor_background_colour)
+        
+        if dlg.ShowModal() == wx.ID_OK:
+            color = dlg.get_color()
+            self.editor_background_colour = color
+            self.apply_editor_appearance()
+            self.set_modified()
+        dlg.Destroy()
+
+    def on_clear_formatting(self, event):
+        """Clear all formatting from selected text"""
+        text_ctrl = self.get_text_control()
+        if not text_ctrl:
+            return
+            
+        selection_start, selection_end = text_ctrl.GetSelection()
+        if selection_start == selection_end:
+            # No selection - clear default style
+            default_font = wx.Font(11, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+            attr = wx.TextAttr()
+            attr.SetFont(default_font)
+            attr.SetTextColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT))
+            attr.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW))
+            text_ctrl.SetDefaultStyle(attr)
+        else:
+            # Clear formatting from selection
+            default_font = wx.Font(11, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+            attr = wx.TextAttr()
+            attr.SetFont(default_font)
+            attr.SetTextColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT))
+            attr.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW))
+            text_ctrl.SetStyle(selection_start, selection_end, attr)
+        
+        text_ctrl.Refresh()
+        self.set_modified()
+
+    def on_toggle_toc_links(self, event):
+        """Toggle automatic TOC links in headers"""
+        # Store the state on the frame and update preview
+        state = self.toc_link_toggle_item.IsChecked()
+        setattr(self, "toc_links_enabled", bool(state))
+        if self.preview_visible:
+            wx.CallAfter(self.update_preview)
 
     def update_preview(self):
         """Update the preview content"""
@@ -1253,6 +1499,57 @@ class GeneralEditor(wx.Panel):
         # Bind events
         self.text_ctrl.Bind(wx.EVT_TEXT, self.on_text_changed)
 
+    def apply_appearance(self, font=None, text_colour=None, background_colour=None):
+        self._apply_text_control_appearance(self.text_ctrl, font, text_colour, background_colour)
+
+    def _apply_text_control_appearance(self, ctrl, font, text_colour, background_colour):
+        """Apply appearance to selected text only, or set default for future typing"""
+        try:
+            # Get current selection
+            selection_start, selection_end = ctrl.GetSelection()
+            has_selection = selection_start != selection_end
+            
+            if has_selection:
+                # Apply to selected text using rich text attributes
+                attr = wx.TextAttr()
+                if font is not None:
+                    attr.SetFont(font)
+                if text_colour is not None:
+                    attr.SetTextColour(text_colour)
+                if background_colour is not None:
+                    attr.SetBackgroundColour(background_colour)
+                
+                # Apply style to selection only
+                ctrl.SetStyle(selection_start, selection_end, attr)
+                
+            else:
+                # No selection - set default style for future typing
+                attr = wx.TextAttr()
+                if font is not None:
+                    attr.SetFont(font)
+                if text_colour is not None:
+                    attr.SetTextColour(text_colour)
+                if background_colour is not None:
+                    attr.SetBackgroundColour(background_colour)
+                    
+                ctrl.SetDefaultStyle(attr)
+                
+            # Force refresh to ensure changes are visible
+            ctrl.Refresh()
+                    
+        except Exception as e:
+            # Fallback to control-level if rich text fails
+            try:
+                if font is not None:
+                    ctrl.SetFont(font)
+                if text_colour is not None:
+                    ctrl.SetForegroundColour(text_colour)
+                if background_colour is not None:
+                    ctrl.SetBackgroundColour(background_colour)
+                ctrl.Refresh()
+            except:
+                pass
+
     def on_text_changed(self, event):
         """Handle text change event"""
         if self.main_frame:
@@ -1384,6 +1681,13 @@ class StructuredEditor(wx.Panel):
         self.auto_dev_deps_btn = wx.Button(controls_panel,
                                          label="Dev Dependencies",
                                          size=(100, -1))
+        # New automation buttons
+        self.auto_examples_main_btn = wx.Button(controls_panel,
+                                               label="Examples → Main",
+                                               size=(120, -1))
+        self.auto_glossary_btn = wx.Button(controls_panel,
+                                          label="Generate Glossary",
+                                          size=(140, -1))
         self.auto_dev_deps_btn.SetToolTip(
             "Automatically read requirements-dev.txt and populate developer dependencies section")
 
@@ -1398,6 +1702,8 @@ class StructuredEditor(wx.Panel):
         controls_sizer.Add(self.auto_file_structure_btn, 0, wx.ALL, 2)
         controls_sizer.Add(self.auto_dependencies_btn, 0, wx.ALL, 2)
         controls_sizer.Add(self.auto_dev_deps_btn, 0, wx.ALL, 2)
+        controls_sizer.Add(self.auto_examples_main_btn, 0, wx.ALL, 2)
+        controls_sizer.Add(self.auto_glossary_btn, 0, wx.ALL, 2)
         
         controls_panel.SetSizer(controls_sizer)
 
@@ -1460,9 +1766,64 @@ class StructuredEditor(wx.Panel):
         self.auto_file_structure_btn.Bind(wx.EVT_BUTTON, self.on_auto_generate_file_structure)
         self.auto_dependencies_btn.Bind(wx.EVT_BUTTON, self.on_auto_generate_dependencies)
         self.auto_dev_deps_btn.Bind(wx.EVT_BUTTON, self.on_auto_generate_dev_dependencies)
+        self.auto_examples_main_btn.Bind(wx.EVT_BUTTON, self.on_auto_populate_examples_main)
+        self.auto_glossary_btn.Bind(wx.EVT_BUTTON, self.on_auto_generate_glossary)
 
         # Add right-click context menu for tree
         self.tree_ctrl.Bind(wx.EVT_RIGHT_UP, self.on_tree_right_click)
+
+    def apply_appearance(self, font=None, text_colour=None, background_colour=None):
+        # Apply to both editors
+        self._apply_text_control_appearance(self.section_editor, font, text_colour, background_colour)
+        self._apply_text_control_appearance(self.overview_ctrl, font, text_colour, background_colour)
+
+    def _apply_text_control_appearance(self, ctrl, font, text_colour, background_colour):
+        """Apply appearance to selected text only, or set default for future typing"""
+        try:
+            # Get current selection
+            selection_start, selection_end = ctrl.GetSelection()
+            has_selection = selection_start != selection_end
+            
+            if has_selection:
+                # Apply to selected text using rich text attributes
+                attr = wx.TextAttr()
+                if font is not None:
+                    attr.SetFont(font)
+                if text_colour is not None:
+                    attr.SetTextColour(text_colour)
+                if background_colour is not None:
+                    attr.SetBackgroundColour(background_colour)
+                
+                # Apply style to selection only
+                ctrl.SetStyle(selection_start, selection_end, attr)
+                
+            else:
+                # No selection - set default style for future typing
+                attr = wx.TextAttr()
+                if font is not None:
+                    attr.SetFont(font)
+                if text_colour is not None:
+                    attr.SetTextColour(text_colour)
+                if background_colour is not None:
+                    attr.SetBackgroundColour(background_colour)
+                    
+                ctrl.SetDefaultStyle(attr)
+                
+            # Force refresh to ensure changes are visible
+            ctrl.Refresh()
+                    
+        except Exception as e:
+            # Fallback to control-level if rich text fails
+            try:
+                if font is not None:
+                    ctrl.SetFont(font)
+                if text_colour is not None:
+                    ctrl.SetForegroundColour(text_colour)
+                if background_colour is not None:
+                    ctrl.SetBackgroundColour(background_colour)
+                ctrl.Refresh()
+            except:
+                pass
 
     def setup_template(self):
         """Set up the structured README template"""
@@ -1943,7 +2304,8 @@ class StructuredEditor(wx.Panel):
                     content += toc_content + "\n"
                 else:
                     # Regular section
-                    child_content = child.to_markdown()
+                    include_toc_links = bool(getattr(self.main_frame, "toc_links_enabled", False)) if self.main_frame else False
+                    child_content = child.to_markdown(include_toc_links=include_toc_links)
                     if child_content.strip():
                         content += child_content + "\n"
 
@@ -2099,6 +2461,108 @@ class StructuredEditor(wx.Panel):
         except Exception as e:
             wx.MessageBox(f"Error generating developer dependencies: {str(e)}",
                         "Error", wx.OK | wx.ICON_ERROR)
+
+    def on_auto_populate_examples_main(self, event):
+        """Populate Example Code > Main from examples/ directory"""
+        try:
+            # Resolve project root
+            project_dir = os.path.dirname(self.main_frame.current_file) if (self.main_frame and self.main_frame.current_file) else os.getcwd()
+            examples_dir = os.path.join(project_dir, "examples")
+            if not os.path.isdir(examples_dir):
+                wx.MessageBox(f"examples/ directory not found in {project_dir}", "Not Found", wx.OK | wx.ICON_WARNING)
+                return
+            # Concatenate example files into a markdown code block listing
+            combined = []
+            for root_dir, _, files in os.walk(examples_dir):
+                for fn in sorted(files):
+                    file_path = os.path.join(root_dir, fn)
+                    rel = os.path.relpath(file_path, project_dir)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            code = f.read()
+                    except Exception:
+                        code = ""
+                    combined.append(f"### {rel}\n\n```\n{code}\n```\n")
+            content_md = "\n".join(combined).strip() or "No examples found."
+            # Find Example Code > Main
+            section = self._find_section_by_name(self.template_root, "Main")
+            if section:
+                section.content = content_md
+                section.enabled = True
+                if self.current_section == section:
+                    self.section_editor.SetValue(section.content)
+                self.refresh_tree_display()
+                if self.main_frame:
+                    self.main_frame.set_modified()
+                    if hasattr(self.main_frame, 'status_bar'):
+                        self.main_frame.status_bar.SetStatusText("Populated Example Code → Main from examples/")
+                    if self.main_frame.preview_visible:
+                        wx.CallAfter(self.main_frame.update_preview)
+            else:
+                wx.MessageBox("Could not find 'Main' under Example Code.", "Section Not Found", wx.OK | wx.ICON_WARNING)
+        except Exception as e:
+            wx.MessageBox(f"Error populating examples: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
+
+    def on_auto_generate_glossary(self, event):
+        """Generate Glossary terms by scanning codebase for docstrings and identifiers"""
+        try:
+            project_dir = os.path.dirname(self.main_frame.current_file) if (self.main_frame and self.main_frame.current_file) else os.getcwd()
+            terms = self._scan_glossary_terms(project_dir)
+            if not terms:
+                wx.MessageBox("No glossary terms found.", "Info", wx.OK | wx.ICON_INFORMATION)
+                return
+            lines = ["### Glossary\n"]
+            for term, definition in sorted(terms.items()):
+                lines.append(f"- **{term}**: {definition}")
+            glossary_md = "\n".join(lines)
+            # Find References > Glossary
+            glossary_section = self._find_section_by_name(self.template_root, "Glossary")
+            if glossary_section:
+                glossary_section.content = glossary_md
+                glossary_section.enabled = True
+                if self.current_section == glossary_section:
+                    self.section_editor.SetValue(glossary_section.content)
+                self.refresh_tree_display()
+                if self.main_frame:
+                    self.main_frame.set_modified()
+                    if hasattr(self.main_frame, 'status_bar'):
+                        self.main_frame.status_bar.SetStatusText("Generated glossary from codebase")
+                    if self.main_frame.preview_visible:
+                        wx.CallAfter(self.main_frame.update_preview)
+            else:
+                wx.MessageBox("Could not find 'Glossary' section.", "Section Not Found", wx.OK | wx.ICON_WARNING)
+        except Exception as e:
+            wx.MessageBox(f"Error generating glossary: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
+
+    def _scan_glossary_terms(self, project_dir: str):
+        """Scan Python files for function/class names and first docstring line as definition"""
+        terms = {}
+        try:
+            import ast
+        except Exception:
+            return terms
+        for root_dir, _, files in os.walk(project_dir):
+            # Skip virtual envs and common dirs
+            base = os.path.basename(root_dir)
+            if base in {'.git', '__pycache__', 'venv', '.venv', 'env', 'node_modules', '.pytest_cache', 'dist', 'build'}:
+                continue
+            for fn in files:
+                if fn.endswith('.py'):
+                    file_path = os.path.join(root_dir, fn)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            source = f.read()
+                        tree = ast.parse(source, filename=file_path)
+                        for node in ast.walk(tree):
+                            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                                name = node.name
+                                doc = ast.get_docstring(node) or ""
+                                first = doc.strip().splitlines()[0] if doc.strip() else "Definition not available."
+                                if name not in terms:
+                                    terms[name] = first
+                    except Exception:
+                        continue
+        return terms
 
     # Helper methods for automation
     def _find_section_by_name(self, section, name):
